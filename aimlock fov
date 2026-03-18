@@ -21,11 +21,9 @@ function AIM:Destroy()
 end
 
 -- ⚙️ CONFIG
-local AIM_ENABLED = true
-local HOLD_KEY = Enum.UserInputType.MouseButton5
-local FOV_RADIUS = 120
-local SMOOTHNESS = 0.15
-local TARGET_PART = "Head" -- เปลี่ยนเป็น HumanoidRootPart ก็ได้
+local teamCheck = false
+local fov = 150
+local smoothing = 1-- ปรับให้นุ่มขึ้น (0.05 - 0.3 แนะนำ)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -33,89 +31,144 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-local aiming = false
-
 -- 🎯 FOV CIRCLE
-local fov = Drawing.new("Circle")
-fov.Radius = FOV_RADIUS
-fov.Thickness = 1.5
-fov.Color = Color3.fromRGB(255,255,255)
-fov.Filled = false
-fov.Visible = true
+local FOVring = Drawing.new("Circle")
+FOVring.Visible = true
+FOVring.Thickness = 1.5
+FOVring.Radius = fov
+FOVring.Transparency = 1
+FOVring.Color = Color3.fromRGB(255, 128, 128)
+FOVring.Filled = false
 
-table.insert(AIM.Objects, fov)
+table.insert(AIM.Objects, FOVring)
 
--- 🖱️ INPUT
-table.insert(AIM.Connections,
-    UserInputService.InputBegan:Connect(function(input)
-        if input.UserInputType == HOLD_KEY then
-            aiming = true
-        end
-    end)
-)
+local function isVisible(part, character)
+    local origin = Camera.CFrame.Position
+    local direction = (part.Position - origin)
 
-table.insert(AIM.Connections,
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == HOLD_KEY then
-            aiming = false
-        end
-    end)
-)
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {LocalPlayer.Character, character}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.IgnoreWater = true
 
--- 🎯 หา target ใกล้สุดใน FOV
-local function GetClosestPlayer()
-    local closest = nil
-    local shortest = FOV_RADIUS
+    local result = workspace:Raycast(origin, direction, params)
 
-    local mousePos = UserInputService:GetMouseLocation()
+    if not result then
+        return true
+    end
 
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild(TARGET_PART) then
-            local part = p.Character[TARGET_PART]
-            local pos, visible = Camera:WorldToViewportPoint(part.Position)
+    -- ถ้า ray ไปโดน part ของ target = มองเห็น
+    return result.Instance:IsDescendantOf(character)
+end
 
-            if visible then
-                local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+local function getClosest()
+    local bestTarget = nil
+    local bestPart = nil
+    local shortest = fov
 
-                if dist < shortest then
-                    shortest = dist
-                    closest = part
+    local screenCenter = Camera.ViewportSize / 2
+
+    for _, v in pairs(Players:GetPlayers()) do
+        if v ~= LocalPlayer
+        and v.Character
+        and v.Character:FindFirstChild("HumanoidRootPart")
+        and v.Character:FindFirstChild("Head")
+        and (v.Team ~= LocalPlayer.Team or not teamCheck) then
+            
+            local char = v.Character
+
+            local head = char:FindFirstChild("Head")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local parts = {
+    char:FindFirstChild("UpperTorso"),
+    char:FindFirstChild("LowerTorso"),
+
+    char:FindFirstChild("LeftUpperArm"),
+    char:FindFirstChild("RightUpperArm"),
+    char:FindFirstChild("LeftLowerArm"),
+    char:FindFirstChild("RightLowerArm"),
+
+    char:FindFirstChild("LeftUpperLeg"),
+    char:FindFirstChild("RightUpperLeg"),
+    char:FindFirstChild("LeftLowerLeg"),
+    char:FindFirstChild("RightLowerLeg")
+}
+			if not char:FindFirstChild("LeftUpperArm") then
+    parts = {
+        char:FindFirstChild("Torso"),
+        char:FindFirstChild("Left Arm"),
+        char:FindFirstChild("Right Arm"),
+        char:FindFirstChild("Left Leg"),
+        char:FindFirstChild("Right Leg")
+    }
+end
+
+            local chosenPart = nil
+
+            -- 🔥 PRIORITY 1: หัว (ถ้ามองเห็น)
+            if head and isVisible(head, char) then
+                chosenPart = head
+            else
+                -- ⚠️ PRIORITY 2: ส่วนอื่นที่โผล่
+                for _, p in ipairs(parts) do
+                    if p and isVisible(p, char) then
+                        chosenPart = p
+                        break
+                    end
+                end
+
+                -- ❌ PRIORITY 3: ไม่เห็นอะไรเลย → fallback หัว
+                if not chosenPart then
+                    chosenPart = head
+                end
+            end
+
+            if chosenPart then
+                local pos, onScreen = Camera:WorldToViewportPoint(chosenPart.Position)
+
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude
+
+                    if dist < shortest then
+                        shortest = dist
+                        bestTarget = v
+                        bestPart = chosenPart
+                    end
                 end
             end
         end
     end
 
-    return closest
+    return bestTarget, bestPart
 end
 
 -- 🔄 LOOP
 table.insert(AIM.Connections,
     RunService.RenderStepped:Connect(function()
+        local cam = Camera
+        local screenCenter = cam.ViewportSize / 2
+        
         -- อัปเดตตำแหน่ง FOV
-        local mouse = UserInputService:GetMouseLocation()
-        fov.Position = mouse
+        FOVring.Position = screenCenter
 
-        if not AIM_ENABLED then return end
+        local pressed = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
 
-        local target = nil
+        if pressed then
+            local curTar, part = getClosest()
 
-        if aiming then
-            target = GetClosestPlayer()
-
-            if target then
-                local targetPos = target.Position
-                local camPos = Camera.CFrame.Position
-
-                local newCF = CFrame.new(camPos, targetPos)
-                Camera.CFrame = Camera.CFrame:Lerp(newCF, SMOOTHNESS)
+            if curTar and part then
+                local newCF = CFrame.new(cam.CFrame.Position, part.Position)
+                cam.CFrame = cam.CFrame:Lerp(newCF, smoothing)
             end
         end
+    end)
+)
 
-        -- 🎨 เปลี่ยนสี FOV
-        if target then
-            fov.Color = Color3.fromRGB(255,0,0)
-        else
-            fov.Color = Color3.fromRGB(255,255,255)
+-- ⌨️ กด Delete เพื่อปิด
+table.insert(AIM.Connections,
+    UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.Delete then
+            AIM:Destroy()
         end
     end)
 )
