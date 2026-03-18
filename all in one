@@ -1,0 +1,462 @@
+if _G.DXD_ESP then
+    _G.DXD_ESP:Destroy()
+end
+if _G.DXD_AIM then
+    _G.DXD_AIM:Destroy()
+end
+
+
+_G.DXD_ESP = {}
+local Manager = _G.DXD_ESP
+_G.DXD_AIM = {}
+local AIM = _G.DXD_AIM
+
+AIM.Connections = {}
+AIM.Objects = {}
+
+function AIM:Destroy()
+    for _, c in pairs(self.Connections) do
+        pcall(function() c:Disconnect() end)
+    end
+    for _, o in pairs(self.Objects) do
+        pcall(function() o:Remove() end)
+    end
+    self.Connections = {}
+    self.Objects = {}
+end
+
+--⚙️ CONFIG
+local teamCheck = false
+local fov = 100
+local smoothing = 1-- ปรับให้นุ่มขึ้น (0.05 - 0.3 แนะนำ)
+-------aim------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+-------esp------
+local ENABLE_SELF_ESP = false -- 🔴 เปิด/ปิด ESP ใส่ตัวเอง
+local ESP_COLOR = Color3.fromRGB(255, 0, 0)
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local ActivePlayers = {}
+local CONFIG = {
+    Box = {
+        Width = 0.2,     -- 🔴 ปรับความกว้าง
+        Height = 0.3,    -- 🔴 ปรับความสูง
+    },
+
+    Scale = {
+        Distance = 800,  -- 🔴 ยิ่งเยอะ = ตัวเล็กลง (สำคัญสุด)
+    },
+
+    HealthBar = {
+        Offset = 6,      -- 🔴 ระยะห่างจากกล่อง
+        Thickness = 2.5, -- 🔴 ความหนาหลอดเลือด
+    }
+}
+
+-- 🎯 FOV CIRCLE
+local FOVring = Drawing.new("Circle")
+FOVring.Visible = true
+FOVring.Thickness = 1.5
+FOVring.Radius = fov
+FOVring.Transparency = 1
+FOVring.Color = Color3.fromRGB(255, 128, 128)
+FOVring.Filled = false
+
+table.insert(AIM.Objects, FOVring)
+
+local function isVisible(part, character)
+    local origin = Camera.CFrame.Position
+    local direction = (part.Position - origin)
+
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {LocalPlayer.Character, character}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.IgnoreWater = true
+
+    local result = workspace:Raycast(origin, direction, params)
+
+    if not result then
+        return true
+    end
+
+    -- ถ้า ray ไปโดน part ของ target = มองเห็น
+    return result.Instance:IsDescendantOf(character)
+end
+
+local function getClosest()
+    local bestTarget = nil
+    local bestPart = nil
+    local shortest = fov
+
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, v in pairs(Players:GetPlayers()) do
+        if v ~= LocalPlayer
+        and v.Character
+        and v.Character:FindFirstChild("HumanoidRootPart")
+        and v.Character:FindFirstChild("Head")
+        and (v.Team ~= LocalPlayer.Team or not teamCheck) then
+            
+            local char = v.Character
+
+            local head = char:FindFirstChild("Head")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local parts = {
+    char:FindFirstChild("UpperTorso"),
+    char:FindFirstChild("LowerTorso"),
+
+    char:FindFirstChild("LeftUpperArm"),
+    char:FindFirstChild("RightUpperArm"),
+    char:FindFirstChild("LeftLowerArm"),
+    char:FindFirstChild("RightLowerArm"),
+
+    char:FindFirstChild("LeftUpperLeg"),
+    char:FindFirstChild("RightUpperLeg"),
+    char:FindFirstChild("LeftLowerLeg"),
+    char:FindFirstChild("RightLowerLeg")
+}
+			if not char:FindFirstChild("LeftUpperArm") then
+    parts = {
+        char:FindFirstChild("Torso"),
+        char:FindFirstChild("Left Arm"),
+        char:FindFirstChild("Right Arm"),
+        char:FindFirstChild("Left Leg"),
+        char:FindFirstChild("Right Leg")
+    }
+end
+
+            local chosenPart = nil
+
+            -- 🔥 PRIORITY 1: หัว (ถ้ามองเห็น)
+            if head and isVisible(head, char) then
+                chosenPart = head
+            else
+                -- ⚠️ PRIORITY 2: ส่วนอื่นที่โผล่
+                for _, p in ipairs(parts) do
+                    if p and isVisible(p, char) then
+                        chosenPart = p
+                        break
+                    end
+                end
+
+                -- ❌ PRIORITY 3: ไม่เห็นอะไรเลย → fallback หัว
+                if not chosenPart then
+                    chosenPart = head
+                end
+            end
+
+            if chosenPart then
+                local pos, onScreen = Camera:WorldToViewportPoint(chosenPart.Position)
+
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+
+                    if dist < shortest then
+                        shortest = dist
+                        bestTarget = v
+                        bestPart = chosenPart
+                    end
+                end
+            end
+        end
+    end
+
+    return bestTarget, bestPart
+end
+
+-- 🔄 LOOP
+table.insert(AIM.Connections,
+    RunService.RenderStepped:Connect(function()
+        local cam = Camera
+	local mousePos = UserInputService:GetMouseLocation()
+	FOVring.Position = Vector2.new(mousePos.X, mousePos.Y)
+        local pressed = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+
+        if pressed then
+            local curTar, part = getClosest()
+
+            if curTar and part then
+                local newCF = CFrame.new(cam.CFrame.Position, part.Position)
+                cam.CFrame = cam.CFrame:Lerp(newCF, smoothing)
+            end
+        end
+    end)
+)
+
+-- ⌨️ กด Delete เพื่อปิด
+table.insert(AIM.Connections,
+    UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.Delete then
+            AIM:Destroy()
+        end
+    end)
+)
+
+local function CreateSquare()
+    local s = Drawing.new("Square")
+    s.Color = ESP_COLOR
+    s.Thickness = 1.5
+    s.Filled = false
+    s.Visible = false
+
+    table.insert(Manager.Objects, s)
+    return s
+end
+
+Manager.Connections = {}
+Manager.Objects = {}
+
+function Manager:Destroy()
+    -- Disconnect ทุก connection
+    for _, c in pairs(self.Connections) do
+        pcall(function() c:Disconnect() end)
+    end
+
+    -- ลบ Drawing ทุกตัว
+    for _, obj in pairs(self.Objects) do
+        pcall(function() obj:Remove() end)
+    end
+
+    -- เคลียร์ table
+    self.Connections = {}
+    self.Objects = {}
+end
+
+local function CreateLine()
+    local l = Drawing.new("Line")
+    l.Color = ESP_COLOR
+    l.Thickness = 1.5
+    l.Transparency = 1
+    l.Visible = false
+
+    table.insert(Manager.Objects, l) -- ✅ เก็บไว้
+    return l
+end
+
+local function CreateCircle()
+    local c = Drawing.new("Circle")
+    c.Color = ESP_COLOR
+    c.Thickness = 1.5
+    c.NumSides = 30
+    c.Filled = false
+    c.Visible = false
+
+    table.insert(Manager.Objects, c) -- ✅ เก็บไว้
+    return c
+end
+
+local function SafeRemove(obj)
+    for i, v in ipairs(Manager.Objects) do
+        if v == obj then
+            table.remove(Manager.Objects, i)
+            break
+        end
+    end
+    pcall(function() obj:Remove() end)
+end
+
+local function ApplySkeleton(player)
+	local box = CreateSquare()
+	local healthBar = CreateLine()
+	healthBar.Thickness = 3
+	if player == LocalPlayer and not ENABLE_SELF_ESP then
+        return
+    end
+	if ActivePlayers[player] then return end
+	ActivePlayers[player] = true
+    local lines = {}
+    for i = 1, 20 do
+        lines[i] = CreateLine()
+    end
+
+    local headCircle = CreateCircle()
+
+    local function draw(p1, p2, line)
+        if p1 and p2 then
+            local a, v1 = Camera:WorldToViewportPoint(p1.Position)
+            local b, v2 = Camera:WorldToViewportPoint(p2.Position)
+
+            if v1 and v2 then
+                line.From = Vector2.new(a.X, a.Y)
+                line.To = Vector2.new(b.X, b.Y)
+                line.Visible = true
+                return
+            end
+        end
+        line.Visible = false
+    end
+
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        	if not player.Character or not player.Parent then
+            	for _, v in pairs(lines) do SafeRemove(v) end
+            	SafeRemove(headCircle)
+		SafeRemove(box)
+		SafeRemove(healthBar)
+				ActivePlayers[player] = nil 
+            	connection:Disconnect()
+            	return
+        	end
+
+        	local char = player.Character
+        	local humanoid = char:FindFirstChildOfClass("Humanoid")
+
+        	if not humanoid then return end
+
+        	local head = char:FindFirstChild("Head")
+
+        	-- HEAD CIRCLE
+        	if head then
+            	local p, v = Camera:WorldToViewportPoint(head.Position)
+            	if v then
+                	headCircle.Position = Vector2.new(p.X, p.Y)
+                	headCircle.Radius = 6 + (1 / (p.Z / 100))
+                	headCircle.Visible = true
+            	else
+                	headCircle.Visible = false
+            	end
+        	end
+
+local root = char:FindFirstChild("HumanoidRootPart")
+
+if root and humanoid then
+    local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+
+    if onScreen then
+        -- 🎯 SCALE กลาง (ใช้ร่วมกัน)
+        local scale = 1 / (pos.Z / CONFIG.Scale.Distance)
+
+        local width = CONFIG.Box.Width * 20 * scale
+        local height = CONFIG.Box.Height * 20 * scale
+
+        local x = pos.X - width / 2
+        local y = pos.Y - height / 2
+
+        -- 🟥 BOX
+        box.Size = Vector2.new(width, height)
+        box.Position = Vector2.new(x, y)
+        box.Visible = true
+
+        -- ❤️ HEALTH BAR
+        local hp = humanoid.Health / humanoid.MaxHealth
+        local barHeight = height * hp
+
+        healthBar.Thickness = CONFIG.HealthBar.Thickness
+
+        healthBar.From = Vector2.new(x - CONFIG.HealthBar.Offset, y + height)
+        healthBar.To = Vector2.new(x - CONFIG.HealthBar.Offset, y + height - barHeight)
+        healthBar.Visible = true
+
+        healthBar.Color = Color3.fromRGB(
+            255 - (255 * hp),
+            255 * hp,
+            0
+        )
+
+    else
+        box.Visible = false
+        healthBar.Visible = false
+    end
+else
+    box.Visible = false
+    healthBar.Visible = false
+end
+
+        	if humanoid.RigType == Enum.HumanoidRigType.R15 then
+            -- ===== R15 =====
+            	local upper = char:FindFirstChild("UpperTorso")
+            	local lower = char:FindFirstChild("LowerTorso")
+
+            	local lUA = char:FindFirstChild("LeftUpperArm")
+            	local lLA = char:FindFirstChild("LeftLowerArm")
+            	local lH = char:FindFirstChild("LeftHand")
+
+            	local rUA = char:FindFirstChild("RightUpperArm")
+            	local rLA = char:FindFirstChild("RightLowerArm")
+            	local rH = char:FindFirstChild("RightHand")
+
+            	local lUL = char:FindFirstChild("LeftUpperLeg")
+            	local lLL = char:FindFirstChild("LeftLowerLeg")
+            	local lF = char:FindFirstChild("LeftFoot")
+
+            	local rUL = char:FindFirstChild("RightUpperLeg")
+            	local rLL = char:FindFirstChild("RightLowerLeg")
+            	local rF = char:FindFirstChild("RightFoot")
+
+            	-- Spine
+            	draw(head, upper, lines[1])
+            	draw(upper, lower, lines[2])
+
+            	-- Arms
+            	draw(upper, lUA, lines[3])
+            	draw(lUA, lLA, lines[4])
+            	draw(lLA, lH, lines[5])
+
+            	draw(upper, rUA, lines[6])
+            	draw(rUA, rLA, lines[7])
+            	draw(rLA, rH, lines[8])
+
+            	-- Legs
+            	draw(lower, lUL, lines[9])
+            	draw(lUL, lLL, lines[10])
+            	draw(lLL, lF, lines[11])
+
+            	draw(lower, rUL, lines[12])
+            	draw(rUL, rLL, lines[13])
+            	draw(rLL, rF, lines[14])
+
+        	else
+            	-- ===== R6 =====
+            	local torso = char:FindFirstChild("Torso")
+
+            	local lArm = char:FindFirstChild("Left Arm")
+            	local rArm = char:FindFirstChild("Right Arm")
+
+            	local lLeg = char:FindFirstChild("Left Leg")
+            	local rLeg = char:FindFirstChild("Right Leg")
+
+            	-- Spine
+            	draw(head, torso, lines[1])
+
+            	-- Arms (ต่อจากตัว)
+            	draw(torso, lArm, lines[2])
+            	draw(torso, rArm, lines[3])
+
+            	-- Legs
+            	draw(torso, lLeg, lines[4])
+            	draw(torso, rLeg, lines[5])
+        	end
+    	end)
+		table.insert(Manager.Connections, connection)
+	end
+
+-- ฟังก์ชัน handle player
+local function OnPlayer(p)
+    -- ถ้ามีตัวละครอยู่แล้ว
+    if p.Character then
+        ApplySkeleton(p)
+    end
+
+    -- รอ spawn ใหม่
+    local conn = p.CharacterAdded:Connect(function()
+        ApplySkeleton(p)
+    end)
+
+    table.insert(Manager.Connections, conn)
+end
+
+-- Apply ให้คนที่อยู่ในเกมแล้ว
+for _, p in pairs(Players:GetPlayers()) do
+    OnPlayer(p)
+end
+
+-- Apply ให้คนใหม่
+table.insert(Manager.Connections,
+    Players.PlayerAdded:Connect(OnPlayer)
+)
