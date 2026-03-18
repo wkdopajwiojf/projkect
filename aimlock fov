@@ -1,0 +1,121 @@
+-- ลบของเก่าถ้ามี
+if _G.DXD_AIM then
+    _G.DXD_AIM:Destroy()
+end
+
+_G.DXD_AIM = {}
+local AIM = _G.DXD_AIM
+
+AIM.Connections = {}
+AIM.Objects = {}
+
+function AIM:Destroy()
+    for _, c in pairs(self.Connections) do
+        pcall(function() c:Disconnect() end)
+    end
+    for _, o in pairs(self.Objects) do
+        pcall(function() o:Remove() end)
+    end
+    self.Connections = {}
+    self.Objects = {}
+end
+
+-- ⚙️ CONFIG
+local AIM_ENABLED = true
+local HOLD_KEY = Enum.UserInputType.MouseButton5
+local FOV_RADIUS = 120
+local SMOOTHNESS = 0.15
+local TARGET_PART = "Head" -- เปลี่ยนเป็น HumanoidRootPart ก็ได้
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local aiming = false
+
+-- 🎯 FOV CIRCLE
+local fov = Drawing.new("Circle")
+fov.Radius = FOV_RADIUS
+fov.Thickness = 1.5
+fov.Color = Color3.fromRGB(255,255,255)
+fov.Filled = false
+fov.Visible = true
+
+table.insert(AIM.Objects, fov)
+
+-- 🖱️ INPUT
+table.insert(AIM.Connections,
+    UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == HOLD_KEY then
+            aiming = true
+        end
+    end)
+)
+
+table.insert(AIM.Connections,
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == HOLD_KEY then
+            aiming = false
+        end
+    end)
+)
+
+-- 🎯 หา target ใกล้สุดใน FOV
+local function GetClosestPlayer()
+    local closest = nil
+    local shortest = FOV_RADIUS
+
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild(TARGET_PART) then
+            local part = p.Character[TARGET_PART]
+            local pos, visible = Camera:WorldToViewportPoint(part.Position)
+
+            if visible then
+                local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+
+                if dist < shortest then
+                    shortest = dist
+                    closest = part
+                end
+            end
+        end
+    end
+
+    return closest
+end
+
+-- 🔄 LOOP
+table.insert(AIM.Connections,
+    RunService.RenderStepped:Connect(function()
+        -- อัปเดตตำแหน่ง FOV
+        local mouse = UserInputService:GetMouseLocation()
+        fov.Position = mouse
+
+        if not AIM_ENABLED then return end
+
+        local target = nil
+
+        if aiming then
+            target = GetClosestPlayer()
+
+            if target then
+                local targetPos = target.Position
+                local camPos = Camera.CFrame.Position
+
+                local newCF = CFrame.new(camPos, targetPos)
+                Camera.CFrame = Camera.CFrame:Lerp(newCF, SMOOTHNESS)
+            end
+        end
+
+        -- 🎨 เปลี่ยนสี FOV
+        if target then
+            fov.Color = Color3.fromRGB(255,0,0)
+        else
+            fov.Color = Color3.fromRGB(255,255,255)
+        end
+    end)
+)
