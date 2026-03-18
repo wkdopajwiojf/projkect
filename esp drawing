@@ -1,0 +1,217 @@
+if _G.DXD_ESP then
+    _G.DXD_ESP:Destroy()
+end
+
+_G.DXD_ESP = {}
+local Manager = _G.DXD_ESP
+
+Manager.Connections = {}
+Manager.Objects = {}
+
+function Manager:Destroy()
+    -- Disconnect ทุก connection
+    for _, c in pairs(self.Connections) do
+        pcall(function() c:Disconnect() end)
+    end
+
+    -- ลบ Drawing ทุกตัว
+    for _, obj in pairs(self.Objects) do
+        pcall(function() obj:Remove() end)
+    end
+
+    -- เคลียร์ table
+    self.Connections = {}
+    self.Objects = {}
+end
+
+local ENABLE_SELF_ESP = true -- 🔴 เปิด/ปิด ESP ใส่ตัวเอง
+local ESP_COLOR = Color3.fromRGB(255, 0, 0)
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local ActivePlayers = {}
+
+
+local function CreateLine()
+    local l = Drawing.new("Line")
+    l.Color = ESP_COLOR
+    l.Thickness = 1.5
+    l.Transparency = 1
+    l.Visible = false
+
+    table.insert(Manager.Objects, l) -- ✅ เก็บไว้
+    return l
+end
+
+local function CreateCircle()
+    local c = Drawing.new("Circle")
+    c.Color = ESP_COLOR
+    c.Thickness = 1.5
+    c.NumSides = 30
+    c.Filled = false
+    c.Visible = false
+
+    table.insert(Manager.Objects, c) -- ✅ เก็บไว้
+    return c
+end
+
+local function SafeRemove(obj)
+    for i, v in ipairs(Manager.Objects) do
+        if v == obj then
+            table.remove(Manager.Objects, i)
+            break
+        end
+    end
+    pcall(function() obj:Remove() end)
+end
+
+local function ApplySkeleton(player)
+	if player == LocalPlayer and not ENABLE_SELF_ESP then
+        return
+    end
+	if ActivePlayers[player] then return end
+	ActivePlayers[player] = true
+    local lines = {}
+    for i = 1, 20 do
+        lines[i] = CreateLine()
+    end
+
+    local headCircle = CreateCircle()
+
+    local function draw(p1, p2, line)
+        if p1 and p2 then
+            local a, v1 = Camera:WorldToViewportPoint(p1.Position)
+            local b, v2 = Camera:WorldToViewportPoint(p2.Position)
+
+            if v1 and v2 then
+                line.From = Vector2.new(a.X, a.Y)
+                line.To = Vector2.new(b.X, b.Y)
+                line.Visible = true
+                return
+            end
+        end
+        line.Visible = false
+    end
+
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        	if not player.Character or not player.Parent then
+            	for _, v in pairs(lines) do SafeRemove(v) end
+            	SafeRemove(headCircle)
+				ActivePlayers[player] = nil 
+            	connection:Disconnect()
+            	return
+        	end
+
+        	local char = player.Character
+        	local humanoid = char:FindFirstChildOfClass("Humanoid")
+
+        	if not humanoid then return end
+
+        	local head = char:FindFirstChild("Head")
+
+        	-- HEAD CIRCLE
+        	if head then
+            	local p, v = Camera:WorldToViewportPoint(head.Position)
+            	if v then
+                	headCircle.Position = Vector2.new(p.X, p.Y)
+                	headCircle.Radius = 6 + (1 / (p.Z / 100))
+                	headCircle.Visible = true
+            	else
+                	headCircle.Visible = false
+            	end
+        	end
+
+        	if humanoid.RigType == Enum.HumanoidRigType.R15 then
+            -- ===== R15 =====
+            	local upper = char:FindFirstChild("UpperTorso")
+            	local lower = char:FindFirstChild("LowerTorso")
+
+            	local lUA = char:FindFirstChild("LeftUpperArm")
+            	local lLA = char:FindFirstChild("LeftLowerArm")
+            	local lH = char:FindFirstChild("LeftHand")
+
+            	local rUA = char:FindFirstChild("RightUpperArm")
+            	local rLA = char:FindFirstChild("RightLowerArm")
+            	local rH = char:FindFirstChild("RightHand")
+
+            	local lUL = char:FindFirstChild("LeftUpperLeg")
+            	local lLL = char:FindFirstChild("LeftLowerLeg")
+            	local lF = char:FindFirstChild("LeftFoot")
+
+            	local rUL = char:FindFirstChild("RightUpperLeg")
+            	local rLL = char:FindFirstChild("RightLowerLeg")
+            	local rF = char:FindFirstChild("RightFoot")
+
+            	-- Spine
+            	draw(head, upper, lines[1])
+            	draw(upper, lower, lines[2])
+
+            	-- Arms
+            	draw(upper, lUA, lines[3])
+            	draw(lUA, lLA, lines[4])
+            	draw(lLA, lH, lines[5])
+
+            	draw(upper, rUA, lines[6])
+            	draw(rUA, rLA, lines[7])
+            	draw(rLA, rH, lines[8])
+
+            	-- Legs
+            	draw(lower, lUL, lines[9])
+            	draw(lUL, lLL, lines[10])
+            	draw(lLL, lF, lines[11])
+
+            	draw(lower, rUL, lines[12])
+            	draw(rUL, rLL, lines[13])
+            	draw(rLL, rF, lines[14])
+
+        	else
+            	-- ===== R6 =====
+            	local torso = char:FindFirstChild("Torso")
+
+            	local lArm = char:FindFirstChild("Left Arm")
+            	local rArm = char:FindFirstChild("Right Arm")
+
+            	local lLeg = char:FindFirstChild("Left Leg")
+            	local rLeg = char:FindFirstChild("Right Leg")
+
+            	-- Spine
+            	draw(head, torso, lines[1])
+
+            	-- Arms (ต่อจากตัว)
+            	draw(torso, lArm, lines[2])
+            	draw(torso, rArm, lines[3])
+
+            	-- Legs
+            	draw(torso, lLeg, lines[4])
+            	draw(torso, rLeg, lines[5])
+        	end
+    	end)
+		table.insert(Manager.Connections, connection)
+	end
+
+-- ฟังก์ชัน handle player
+local function OnPlayer(p)
+    -- ถ้ามีตัวละครอยู่แล้ว
+    if p.Character then
+        ApplySkeleton(p)
+    end
+
+    -- รอ spawn ใหม่
+    local conn = p.CharacterAdded:Connect(function()
+        ApplySkeleton(p)
+    end)
+
+    table.insert(Manager.Connections, conn)
+end
+
+-- Apply ให้คนที่อยู่ในเกมแล้ว
+for _, p in pairs(Players:GetPlayers()) do
+    OnPlayer(p)
+end
+
+-- Apply ให้คนใหม่
+table.insert(Manager.Connections,
+    Players.PlayerAdded:Connect(OnPlayer)
+)
